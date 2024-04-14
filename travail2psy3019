@@ -1,0 +1,180 @@
+#Ici ce trouve mon app
+# c'est le fichier principal qui va être lu
+import os
+import pandas as pd
+import numpy as np
+import seaborn as sns
+from statsmodels.formula.api import ols
+from scipy import stats
+from sklearn.cluster import KMeans
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+
+#code
+# library de fonct
+# au moins 5 « def » sont présent
+# au moins une classe est présent
+
+class GetDataToAnalyze:
+	def __init__(self, head_path):
+		self.head_path = head_path
+		self.path = self.path_load()
+		self.data = self.load_data()
+
+	def path_load(self):
+		tail_path = 'HugoDelhaye_psy6973_data_20240116.csv'
+		path = os.path.join(self.head_path, tail_path)
+		print(path)
+		return path
+
+	def load_data(self):
+		
+		return pd.read_csv(self.path)
+	
+	def clean_data(self, data):
+		# code pour la gestion des erreurs est inclus
+		try:
+			if not isinstance(data, pd.DataFrame):
+				raise TypeError('erreur: "data" doit être un DataFrame')
+			# code pour vérifier la présence des valeurs manquantes implémenté
+			self.data =  self.data.replace(['.', 'F'], np.nan).astype(np.float64)
+			return self.data
+		except TypeError as e:
+			print(e)
+			return None
+
+
+	def data_augmentation(self, data):
+		striatum_mean = (data['r_striatum'] + data['l_striatum']) / 2
+
+		moca_mean = data['moca'].mean()
+		moca_bool = data['moca'] > moca_mean
+		moca_cat = moca_bool.astype(int)
+
+		
+		physio = self.fonction_recursive(np.asanyarray(data['rigidity']), 
+								   		np.asanyarray(data['tremor']))
+
+		self.data.insert(1, 'physio', physio, True)
+		self.data.insert(1, 'striatum_mean', striatum_mean, True)
+		self.data.insert(1, 'moca_cat', moca_cat, True)
+
+		return self.data
+	
+
+	#code pour codage récursif, présent
+	def fonction_recursive(self, list1, list2):
+		if len(list1) == 0:
+			return []
+		else:
+			return [list1[0] + list2[0]] + self.fonction_recursive(list1[1:], list2[1:])
+
+
+head_path = os.path.dirname(os.path.abspath(__file__))
+print(head_path)
+p = GetDataToAnalyze(head_path)
+p.clean_data(p.data)
+p.data_augmentation(p.data)
+df = p.data
+
+gdsF = df[df['sex'] == 1]['gds']
+gdsM = df[df['sex'] == 2]['gds']
+
+# code pour stats utilise les modules statsmodels + SciPy
+
+model1 = ols("physio ~ ageonset", df).fit()
+model2 = ols("physio ~ striatum_mean", df).fit()
+testt3 = stats.ttest_ind(gdsF, gdsM)
+
+print(model1.summary())
+print(model2.summary())
+print(testt3.statistic, testt3.pvalue)
+
+# graphique pour les stats (statsmodels, SciPy) présent
+
+# Les femmes sont moins dépressives que les hommes.
+#plt.hist([gdsF, gdsM], label=["Gds des Femmes", "Gds des Hommes"])
+plt.xlabel("Score gds")
+plt.ylabel("Fréquence")
+plt.legend()
+#plt.show()
+plt.close()
+
+# Plus le striatum est grand, moins il y a de syndromes physiologiques
+#sns.regplot(df, x='striatum_mean', y='physio', marker = "+")
+#plt.show()
+plt.close()
+
+# Plus les premiers syndromes se manifestent tôt, moins les syndromes moteurs sont graves
+#sns.regplot(df, x='ageonset', y='physio', marker = "+")
+#plt.show()
+plt.close()
+
+####### entrainement des modèles
+
+# code préparation données
+
+drop_out = np.where(df['striatum_mean'].isna() == True)
+
+X_AA_sup = np.delete(df['striatum_mean'].values, drop_out, axis=0)
+y_AA_sup = np.delete(df['moca_cat'].values, drop_out, axis=0)
+
+X_AA_sup = np.ravel(X_AA_sup)
+y_AA_sup = np.ravel(y_AA_sup)
+
+# sépare gds du reste
+X_AA_non_sup = df.drop('gds', axis=1)
+y_AA_non_sup = df.gds
+
+drop_out = np.where(df['striatum_mean'].isna() == True)
+
+X_AA_non_sup = np.delete(df['striatum_mean'].values, drop_out, axis=0)
+y_AA_non_sup = np.delete(df['moca_cat'].values, drop_out, axis=0)
+
+X_AA_non_sup = np.ravel(X_AA_sup).reshape(-1, 1)
+y_AA_non_sup = np.ravel(y_AA_sup)
+
+
+# entrainment des modeles
+model1 = SVC(kernel='linear', C=1)
+
+#code pour la validation croisée est utilisé
+scores1 = cross_val_score(model1, X_AA_sup.reshape(-1, 1), y_AA_sup, cv=10)
+
+# Fit the model
+model1.fit(X_AA_sup.reshape(-1, 1), y_AA_sup)
+
+# Make predictions
+predictions1 = model1.predict(X_AA_sup.reshape(-1, 1))
+
+# Create confusion matrix
+confusion_matrix1 = confusion_matrix(y_AA_sup, predictions1)
+sns.heatmap(confusion_matrix1.T, square=True, annot=True, fmt='d', cbar=False)
+plt.show()
+plt.close()
+
+# code pour le formatage des chaînes est utilisé
+print("Accuracy: %0.2f (+/- %0.2f)" % (scores1.mean(), scores1.std() * 2))
+
+model2 = KMeans(n_clusters=10)
+
+#code pour la validation croisée est utilisé
+scores2 = cross_val_predict(model2, X_AA_non_sup, y_AA_non_sup, cv=10)
+
+# Fit the model
+model2.fit(X_AA_non_sup.reshape(-1, 1), y_AA_non_sup)
+
+# Make predictions
+predictions2 = model2.predict(X_AA_non_sup.reshape(-1, 1))
+
+# Create confusion matrix
+confusion_matrix2 = confusion_matrix(y_AA_non_sup, predictions2)
+sns.heatmap(confusion_matrix2.T, square=True, annot=True, fmt='d', cbar=False)
+plt.show()
+plt.close()
+
+# Print the predictions
+#print("Predictions:", predictions)
